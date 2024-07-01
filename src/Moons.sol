@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/utils/math/Math.sol";
-import "https://github.com/mds1/solidity-trigonometry/blob/main/src/Trigonometry.sol";
+import "openzeppelin-contracts/contracts/utils/math/Math.sol";
+import "solidity-trigonometry/Trigonometry.sol";
 
 interface IERC20 {
     function transfer(address recipient, uint256 amount) external returns (bool);
