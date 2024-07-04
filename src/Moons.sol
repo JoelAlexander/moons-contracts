@@ -1,18 +1,13 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.26;
+pragma solidity 0.8.24;
 
-import "openzeppelin-contracts/contracts/utils/math/Math.sol";
-import "solidity-trigonometry/Trigonometry.sol";
-
-interface IERC20 {
-    function transfer(address recipient, uint256 amount) external returns (bool);
-    function balanceOf(address account) external view returns (uint256);
-    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
-}
+import "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
+import "../lib/openzeppelin-contracts/contracts/utils/math/Math.sol";
+import "../lib/solidity-trigonometry/src/Trigonometry.sol";
 
 contract Moons {
 
-    uint256 constant PHASE_OFFSET_SCALED = 3_141592653589793238;
+    uint256 constant PHASE_OFFSET_FIXED18 = 3_141592653589793238;
 
     event AdminAdded(address indexed admin, address indexed addedBy, uint256 rank, string memo);
     event AdminRemoved(address indexed admin, address indexed addedBy, uint256 rank, string memo);
@@ -37,25 +32,49 @@ contract Moons {
     mapping(address => mapping(address => uint256)) lastAddCycle;
     mapping(address => mapping(address => uint256)) lastDisburseCycle;
 
-    function getCycle() public view returns (uint256, uint256) {
+    function sqrt(uint256 x) public pure returns (uint256) {
+        if (x == 0) return 0;
+        if (x <= 3) return 1;
+        
+        uint256 z = x / 2;
+        uint256 y = x;
+
+        // Newton-Raphson iteration
+        while (z < y) {
+            y = z;
+            z = (x / z + z) / 2;
+        }
+
+        return y;
+    }
+
+    function getCycleParameters() public view returns (uint256, uint256) {
         return (startTime, cycleTime);
     }
 
     function getCurrentCycle() public view returns (uint256) {
-        return (block.timestamp - startTime) / cycleTime;
+        return (block.timestamp - startTime + cycleTime) / cycleTime;
     }
 
     function getCycleMultiplier(address token) public view returns (int256) {
         uint256 elapsedTime = block.timestamp - startTime;
-        uint256 currentParticipantCount = tokenParticipantCount[token];
+        uint256 participantCount = tokenParticipantCount[token];
         uint256 participantRank = tokenParticipantRank[token][msg.sender];
-        if (currentParticipantCount == 0 || participantRank == 0) {
+        if (participantCount == 0 || participantRank == 0) {
             return 0;
         }
 
-        uint256 offsetRadiansScaled = ((participantRank - 1) * 2 * 3_141592653589793238) / currentParticipantCount;
-        uint256 elapsedTimeRadiansScaled = (elapsedTime * 2 * 3_141592653589793238) / cycleTime;
-        return Trigonometry.cos(elapsedTimeRadiansScaled + offsetRadiansScaled + PHASE_OFFSET_SCALED);
+        uint256 offsetRadiansFixed18 = ((participantRank - 1) * 2 * 3_141592653589793238) / participantCount;
+        uint256 elapsedTimeRadiansFixed18 = (elapsedTime * 2 * 3_141592653589793238) / cycleTime;
+        return Trigonometry.cos(elapsedTimeRadiansFixed18 + offsetRadiansFixed18 + PHASE_OFFSET_FIXED18);
+    }
+
+    function getMaximumAllowedDisbursement(address token) public view returns (uint256) {
+        int256 cycleMultiplier = getCycleMultiplier(token);
+        uint256 balance = IERC20(token).balanceOf(address(this));
+        uint256 participantCount = tokenParticipantCount[token];
+        uint256 sqrtParticipantCountFixed6 = sqrt(participantCount * 1e6 * 1e6);
+        return cycleMultiplier < 0 ? 0 : (uint256(cycleMultiplier) * balance) / (sqrtParticipantCountFixed6 * 1e12);
     }
 
     function getAdminCount() public view returns (uint) {
@@ -72,7 +91,7 @@ contract Moons {
     }
 
     modifier requireAdminSeniority(address addr) {
-        require(adminRank[msg.sender] > 0 && adminRank[addr] > 0 && adminRank[msg.sender] < adminRank[addr],
+        require(adminRank[msg.sender] > 0 && adminRank[addr] > 0 && (adminRank[msg.sender] < adminRank[addr]),
         "Must have admin seniority");
         _;
     }
@@ -93,6 +112,11 @@ contract Moons {
         uint256 currentCycle = getCurrentCycle();
         require(lastDisburseCycle[token][msg.sender] < currentCycle, "Can only disburse funds once per cycle");
         lastDisburseCycle[token][msg.sender] = currentCycle;
+        _;
+    }
+
+    modifier disbursementValueIsBelowMaximum(address token, uint256 value) {
+        require(value < getMaximumAllowedDisbursement(token), "Value equals or exceeds maximum allowed disbursment");
         _;
     }
 
@@ -193,23 +217,14 @@ contract Moons {
         emit ParticipantRemoved(token, participant, msg.sender, removedRank, memo);
     }
 
-    function addFunds(address token, uint256 amount, string calldata memo) external requireParticipant(token) addOncePerCycle(token) {
-        int256 cycleMultiplier = getCycleMultiplier(token) * int256(-1);
-        require(cycleMultiplier > 0, "May not add funds at this time");
-        uint256 balance = IERC20(token).balanceOf(address(this));
-        uint256 maxAllowedAmount = balance == 0 ? ~uint256(0) : (uint256(cycleMultiplier) * balance * 2) / 1E18;
-        require(amount < maxAllowedAmount, "Amount exceeds max allowed");
-        require(IERC20(token).transferFrom(msg.sender, address(this), amount), "Transfer failed");
-        emit FundsAdded(token, msg.sender, amount, memo);
+    function addFunds(address token, uint256 value, string calldata memo) external requireParticipant(token) addOncePerCycle(token) {
+        require(getCycleMultiplier(token) < 0, "May not add funds at this time");
+        require(IERC20(token).transferFrom(msg.sender, address(this), value), "Transfer failed");
+        emit FundsAdded(token, msg.sender, value, memo);
     }
 
-    function disburseFunds(address token, uint256 amount, string calldata memo) external requireParticipant(token) disburseOncePerCycle(token) {
-        int256 cycleMultiplier = getCycleMultiplier(token);
-        require(cycleMultiplier > 0, "May not disburse funds at this time");
-        uint256 balance = IERC20(token).balanceOf(address(this));
-        uint256 maxAllowedAmount = (uint256(cycleMultiplier) * balance) / (1E18 * 2);
-        require(amount < maxAllowedAmount, "Amount exceeds max allowed");
-        require(IERC20(token).transfer(msg.sender, amount), "Transfer failed");
-        emit FundsDisbursed(token, msg.sender, amount, memo);
+    function disburseFunds(address token, uint256 value, string calldata memo) external requireParticipant(token) disburseOncePerCycle(token) disbursementValueIsBelowMaximum(token, value) {
+        require(IERC20(token).transfer(msg.sender, value), "Transfer failed");
+        emit FundsDisbursed(token, msg.sender, value, memo);
     }
 }
