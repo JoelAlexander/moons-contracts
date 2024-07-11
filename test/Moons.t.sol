@@ -35,10 +35,10 @@ contract MoonsTest is Test {
         vm.startPrank(admin1);
         moons = new Moons(1 days);
         moons.addAdmin(admin2, "Add second admin");
-        moons.addParticipant(address(testToken), participant1, "Add participant 1");
-        moons.addParticipant(address(testToken), participant2, "Add participant 2");
-        moons.addParticipant(address(testToken), participant3, "Add participant 3");
-        moons.addParticipant(address(testToken), participant4, "Add participant 4");
+        moons.addParticipant(participant1, "Add participant 1");
+        moons.addParticipant(participant2, "Add participant 2");
+        moons.addParticipant(participant3, "Add participant 3");
+        moons.addParticipant(participant4, "Add participant 4");
         vm.stopPrank();
 
         // Mint tokens to participants
@@ -67,33 +67,29 @@ contract MoonsTest is Test {
 
     function testAddParticipant() public {
         vm.startPrank(admin2);
-        moons.addParticipant(address(testToken), address(0x7), "Add participant 5");
-        (address[] memory participants, ) = moons.getTokenParticipants(address(testToken));
+        moons.addParticipant(address(0x7), "Add participant 5");
+        (address[] memory participants, ) = moons.getParticipants();
         assertEq(participants[4], address(0x7));
         vm.stopPrank();
     }
 
     function testRemoveParticipant() public {
         vm.startPrank(admin1);
-        moons.removeParticipant(address(testToken), participant1, "Remove participant 1");
-        (address[] memory participants, ) = moons.getTokenParticipants(address(testToken));
+        moons.removeParticipant(participant1, "Remove participant 1");
+        (address[] memory participants, ) = moons.getParticipants();
         assertEq(participants.length, 3);
         vm.stopPrank();
     }
 
     function testAddFunds() public {
         vm.prank(participant1);
-        testToken.approve(address(moons), 500 ether);
-        vm.prank(participant1);
-        moons.addFunds(address(testToken), 500 ether, "Add funds");
-        //assertEq(testToken.balanceOf(address(moons)), 500 ether);
+        testToken.transfer(address(moons), 500 ether);
+        assertEq(testToken.balanceOf(address(moons)), 500 ether);
     }
 
     function testDisburseFunds() public {
         vm.prank(participant1);
-        testToken.approve(address(moons), 500 ether);
-        vm.prank(participant1);
-        moons.addFunds(address(testToken), 500 ether, "Add funds");
+        testToken.transfer(address(moons), 500 ether);
 
         vm.warp(block.timestamp + 13 hours);
 
@@ -102,22 +98,14 @@ contract MoonsTest is Test {
         assertEq(testToken.balanceOf(participant1), 700 ether);
     }
 
-    function testAddOncePerCycle() public {
+    function testSelfRemove() public {
         vm.prank(participant1);
-        testToken.approve(address(moons), 500 ether);
-        vm.prank(participant1);
-        moons.addFunds(address(testToken), 500 ether, "Add funds");
-
-        vm.expectRevert("Can only add funds once per cycle");
-        vm.prank(participant1);
-        moons.addFunds(address(testToken), 500 ether, "Add funds again");
+        moons.removeParticipant(participant1, "Goodbye!");
     }
 
     function testDisburseOncePerCycle() public {
         vm.prank(participant1);
-        testToken.approve(address(moons), 500 ether);
-        vm.prank(participant1);
-        moons.addFunds(address(testToken), 500 ether, "Add funds");
+        testToken.transfer(address(moons), 500 ether);
 
         vm.warp(block.timestamp + 13 hours);
 
@@ -140,36 +128,32 @@ contract MoonsTest is Test {
     }
 
     function testParticipantRestriction() public {
-        vm.expectRevert("Sender must be a token participant");
-        moons.addFunds(address(testToken), 500 ether, "Non-participant add funds");
-    }
-
-    function testCycleMultiplier() public {
-        vm.warp(block.timestamp + 1 hours);
-        vm.prank(participant1);
-        assertEq(moons.getCycleMultiplier(address(testToken)), -965921801033393387);
-        vm.prank(participant2);
-        assertEq(moons.getCycleMultiplier(address(testToken)), 258817904283673457);
-        vm.prank(participant3);
-        assertEq(moons.getCycleMultiplier(address(testToken)), 965921801033393387);
-        vm.prank(participant4);
-        assertEq(moons.getCycleMultiplier(address(testToken)), -258817904283673457);
+        vm.expectRevert("Sender must be a participant");
+        moons.disburseFunds(address(testToken), 500 ether, "Non-participant add funds");
     }
 
     function testMaximumAllowedDisbursment() public {
         vm.prank(participant1);
-        testToken.approve(address(moons), 500 ether);
-        vm.prank(participant1);
-        moons.addFunds(address(testToken), 500 ether, "Add funds");
+        testToken.transfer(address(moons), 500 ether);
 
         vm.warp(block.timestamp + 1 hours);
         vm.prank(participant1);
-        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 0);
+        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 32631403083275725500);
         vm.prank(participant2);
-        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 64704476070918364250);
+        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 198337500075966818250);
         vm.prank(participant3);
-        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 241480450258348346750);
+        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 247860179630974391250);
         vm.prank(participant4);
-        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 0);
+        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 152189727361402347250);
+
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(participant1);
+        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 32631403083275725500);
+        vm.prank(participant2);
+        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 198337500075966818250);
+        vm.prank(participant3);
+        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 247860179630974391250);
+        vm.prank(participant4);
+        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 152189727361402347250);
     }
 }

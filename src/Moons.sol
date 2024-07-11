@@ -7,14 +7,11 @@ import "../lib/solidity-trigonometry/src/Trigonometry.sol";
 
 contract Moons {
 
-    uint256 constant PHASE_OFFSET_FIXED18 = 3_141592653589793238;
-
     event AdminAdded(address indexed admin, address indexed addedBy, uint256 rank, string memo);
     event AdminRemoved(address indexed admin, address indexed addedBy, uint256 rank, string memo);
-    event FundsAdded(address indexed token, address indexed participant, uint256 amount, string memo);
+    event ParticipantAdded(address indexed participant, address indexed addedBy, uint256 rank, string memo);
+    event ParticipantRemoved(address indexed participant, address indexed addedBy, uint256 rank, string memo);
     event FundsDisbursed(address indexed token, address indexed participant, uint256 amount, string memo);
-    event ParticipantAdded(address indexed token, address indexed participant, address indexed addedBy, uint256 rank, string memo);
-    event ParticipantRemoved(address indexed token, address indexed participant, address indexed addedBy, uint256 rank, string memo);
 
     uint256 public startTime;
     uint256 public cycleTime;
@@ -24,12 +21,11 @@ contract Moons {
     mapping(address => uint) adminRank;
     uint adminCount;
 
-    mapping(address => address[]) tokenParticipants;
-    mapping(address => mapping(address => uint)) tokenParticipantIndex;
-    mapping(address => mapping(address => uint)) tokenParticipantRank;
-    mapping(address => uint) tokenParticipantCount;
+    address[] participants;
+    mapping(address => uint) participantIndex;
+    mapping(address => uint) participantRank;
+    uint participantCount;
 
-    mapping(address => mapping(address => uint256)) lastAddCycle;
     mapping(address => mapping(address => uint256)) lastDisburseCycle;
 
     function sqrt(uint256 x) public pure returns (uint256) {
@@ -56,33 +52,21 @@ contract Moons {
         return (block.timestamp - startTime + cycleTime) / cycleTime;
     }
 
-    function getCycleMultiplier(address token) public view returns (int256) {
+    function getMaximumAllowedDisbursement(address token) public view returns (uint256) {
+        uint256 balance = IERC20(token).balanceOf(address(this));
         uint256 elapsedTime = block.timestamp - startTime;
-        uint256 participantCount = tokenParticipantCount[token];
-        uint256 participantRank = tokenParticipantRank[token][msg.sender];
-        if (participantCount == 0 || participantRank == 0) {
+        uint256 rank = participantRank[msg.sender];
+        if (participantCount == 0 || rank == 0) {
             return 0;
         }
 
-        uint256 offsetRadiansFixed18 = ((participantRank - 1) * 2 * 3_141592653589793238) / participantCount;
-        uint256 elapsedTimeRadiansFixed18 = (elapsedTime * 2 * 3_141592653589793238) / cycleTime;
-        return Trigonometry.cos(elapsedTimeRadiansFixed18 + offsetRadiansFixed18 + PHASE_OFFSET_FIXED18);
-    }
-
-    function getMaximumAllowedDisbursement(address token) public view returns (uint256) {
-        int256 cycleMultiplier = getCycleMultiplier(token);
-        uint256 balance = IERC20(token).balanceOf(address(this));
-        uint256 participantCount = tokenParticipantCount[token];
-        uint256 sqrtParticipantCountFixed6 = sqrt(participantCount * 1e6 * 1e6);
-        return cycleMultiplier < 0 ? 0 : (uint256(cycleMultiplier) * balance) / (sqrtParticipantCountFixed6 * 1e12);
-    }
-
-    function getAdminCount() public view returns (uint) {
-        return adminCount;
-    }
-
-    function getTokenParticipantCount(address token) public view returns (uint) {
-        return tokenParticipantCount[token];
+        uint256 cycleTimeOffsetRadiansFixed18 = (elapsedTime * 2 * 3_141592653589793238) / cycleTime;
+        uint256 participantOffsetRadiansFixed18 = ((rank - 1) * 2 * 3_141592653589793238) / participantCount;
+        uint256 totalRadiansFixed18 = cycleTimeOffsetRadiansFixed18 + participantOffsetRadiansFixed18;
+        int256 multiplierSignedFixed18 = Trigonometry.sin(totalRadiansFixed18 / 2);
+        uint256 multiplierFixed18 = multiplierSignedFixed18 > 0 ? uint256(multiplierSignedFixed18) : uint256(-multiplierSignedFixed18);
+        uint256 sqrtParticipantCountFixed6 = sqrt(participantCount * (1e6 ** 2));
+        return multiplierFixed18 * balance / (sqrtParticipantCountFixed6 * 1e12);
     }
 
     modifier requireAdmin() {
@@ -96,15 +80,13 @@ contract Moons {
         _;
     }
 
-    modifier requireParticipant(address token) {
-        require(tokenParticipantRank[token][msg.sender] != 0, "Sender must be a token participant");
+    modifier requireParticipant() {
+        require(participantRank[msg.sender] != 0, "Sender must be a participant");
         _;
     }
 
-    modifier addOncePerCycle(address token) {
-        uint256 currentCycle = getCurrentCycle();
-        require(lastAddCycle[token][msg.sender] < currentCycle, "Can only add funds once per cycle");
-        lastAddCycle[token][msg.sender] = currentCycle;
+    modifier requireAdminOrSelf(address participant) {
+        require(adminRank[msg.sender] > 0 || msg.sender == participant, "Sender must be an admin or the participant");
         _;
     }
 
@@ -136,17 +118,16 @@ contract Moons {
         return (addresses, ranks);
     }
 
-    function getTokenParticipants(address token) public view returns (address[] memory, uint256[] memory) {
+    function getParticipants() public view returns (address[] memory, uint256[] memory) {
         uint j = 0;
-        uint256 participantCount = tokenParticipantCount[token];
         address[] memory addresses = new address[](participantCount);
         uint256[] memory ranks = new uint256[](participantCount);
-        for (uint i = 0; i < tokenParticipants[token].length; i++) {
-            address addr = tokenParticipants[token][i];
-            uint activeIndex = tokenParticipantIndex[token][addr];
+        for (uint i = 0; i < participants.length; i++) {
+            address addr = participants[i];
+            uint activeIndex = participantIndex[addr];
             if (activeIndex != 0 && (activeIndex - 1) == i) {
                 addresses[j] = addr;
-                ranks[j] = tokenParticipantRank[token][addr];
+                ranks[j] = participantRank[addr];
                 j++;
             }
         }
@@ -189,41 +170,35 @@ contract Moons {
         emit AdminRemoved(admin, msg.sender, removedRank, memo);
     }
 
-    function addParticipant(address token, address participant, string calldata memo) external requireAdmin {
-        require(tokenParticipantRank[token][participant] == 0, "Must not already be a token participant");
-        uint256 index = tokenParticipants[token].length + 1;
-        uint256 rank = tokenParticipantCount[token] + 1;
-        tokenParticipantIndex[token][participant] = index;
-        tokenParticipantRank[token][participant] = rank;
-        tokenParticipants[token].push(participant);
-        tokenParticipantCount[token]++;
-        emit ParticipantAdded(token, participant, msg.sender, rank, memo);
+    function addParticipant(address participant, string calldata memo) external requireAdmin {
+        require(participantRank[participant] == 0, "Must not already be a participant");
+        uint256 index = participants.length + 1;
+        uint256 rank = participantCount + 1;
+        participantIndex[participant] = index;
+        participantRank[participant] = rank;
+        participants.push(participant);
+        participantCount++;
+        emit ParticipantAdded(participant, msg.sender, rank, memo);
     }
 
-    function removeParticipant(address token, address participant, string calldata memo) external requireAdmin {
-        uint256 removedRank = tokenParticipantRank[token][participant];
-        require(removedRank > 0, "Must already be a token participant");
-        for (uint i = 0; i < tokenParticipants[token].length; i++) {
-            address addr = tokenParticipants[token][i];
-            uint activeIndex = tokenParticipantIndex[token][addr];
-            uint checkRank = tokenParticipantRank[token][addr];
+    function removeParticipant(address participant, string calldata memo) external requireAdminOrSelf(participant) {
+        uint256 removedRank = participantRank[participant];
+        require(removedRank > 0, "Must already be a participant");
+        for (uint i = 0; i < participants.length; i++) {
+            address addr = participants[i];
+            uint activeIndex = participantIndex[addr];
+            uint checkRank = participantRank[addr];
             if (activeIndex != 0 && (activeIndex - 1) == i && checkRank > removedRank) {
-                tokenParticipantRank[token][addr] = checkRank - 1;
+                participantRank[addr] = checkRank - 1;
             }
         }
-        tokenParticipantIndex[token][participant] = 0;
-        tokenParticipantRank[token][participant] = 0;
-        tokenParticipantCount[token]--;
-        emit ParticipantRemoved(token, participant, msg.sender, removedRank, memo);
+        participantIndex[participant] = 0;
+        participantRank[participant] = 0;
+        participantCount--;
+        emit ParticipantRemoved(participant, msg.sender, removedRank, memo);
     }
 
-    function addFunds(address token, uint256 value, string calldata memo) external requireParticipant(token) addOncePerCycle(token) {
-        require(getCycleMultiplier(token) < 0, "May not add funds at this time");
-        require(IERC20(token).transferFrom(msg.sender, address(this), value), "Transfer failed");
-        emit FundsAdded(token, msg.sender, value, memo);
-    }
-
-    function disburseFunds(address token, uint256 value, string calldata memo) external requireParticipant(token) disburseOncePerCycle(token) disbursementValueIsBelowMaximum(token, value) {
+    function disburseFunds(address token, uint256 value, string calldata memo) external requireParticipant disburseOncePerCycle(token) disbursementValueIsBelowMaximum(token, value) {
         require(IERC20(token).transfer(msg.sender, value), "Transfer failed");
         emit FundsDisbursed(token, msg.sender, value, memo);
     }
