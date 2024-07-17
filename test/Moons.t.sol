@@ -46,6 +46,10 @@ contract MoonsTest is Test {
         testToken.mint(participant2, 1000 ether);
         testToken.mint(participant3, 1000 ether);
         testToken.mint(participant4, 1000 ether);
+
+        // Chain must be at least cycleTime old for Moons to allow disbursement
+        // This may not be acceptible for niche use-cases, consider revising.
+        vm.warp(block.timestamp + 1 days);
     }
 
     function testAddAdmin() public {
@@ -112,7 +116,7 @@ contract MoonsTest is Test {
         vm.prank(participant1);
         moons.disburseFunds(address(testToken), 200 ether, "Disburse funds");
 
-        vm.expectRevert("Can only disburse funds once per cycle");
+        vm.expectRevert("May only disburse funds once per cycle");
         vm.prank(participant1);
         moons.disburseFunds(address(testToken), 100 ether, "Disburse funds again");
     }

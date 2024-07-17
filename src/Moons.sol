@@ -22,7 +22,7 @@ contract Moons {
     uint256 public immutable startTime;
     uint256 public immutable cycleTime;
 
-    mapping(address => uint256) lastDisburseCycle;
+    mapping(address => uint256) lastDisburseTime;
 
     address[] admins;
     uint256 adminCount;
@@ -67,19 +67,14 @@ contract Moons {
     }
 
     modifier disburseOncePerCycle() {
-        uint256 currentCycle = getCurrentCycle();
-        require(lastDisburseCycle[msg.sender] < currentCycle, "Can only disburse funds once per cycle");
-        lastDisburseCycle[msg.sender] = currentCycle;
+        require(block.timestamp - lastDisburseTime[msg.sender] > cycleTime, "May only disburse funds once per cycle");
+        lastDisburseTime[msg.sender] = block.timestamp;
         _;
     }
 
     modifier disbursementValueIsBelowMaximum(address token, uint256 value) {
-        require(value < getMaximumAllowedDisbursement(token), "Value equals or exceeds maximum allowed disbursment");
+        require(value <= getMaximumAllowedDisbursement(token), "Value exceeds maximum allowed disbursment");
         _;
-    }
-
-    function getCurrentCycle() public view returns (uint256) {
-        return 1 + ((block.timestamp - startTime) / cycleTime);
     }
 
     function getMaximumAllowedDisbursement(address token) public view returns (uint256) {
@@ -100,7 +95,7 @@ contract Moons {
     }
 
     function mayDisburse(address addr) public view returns (bool) {
-        return lastDisburseCycle[addr] < getCurrentCycle();
+        return block.timestamp - lastDisburseTime[addr] > cycleTime;
     }
 
     function getAdmins() public view returns (address[] memory, uint256[] memory) {
