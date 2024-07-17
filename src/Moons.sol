@@ -94,8 +94,8 @@ contract Moons {
         return multiplierFixed18 * balance / (sqrtParticipantCountFixed6 * 1e12);
     }
 
-    function mayDisburse(address addr) public view returns (bool) {
-        return block.timestamp - lastDisburseTime[addr] > cycleTime;
+    function getNextAllowedDisburseTime(address addr) public view returns (uint256) {
+        return lastDisburseTime[addr] + cycleTime;
     }
 
     function getAdmins() public view returns (address[] memory, uint256[] memory) {
