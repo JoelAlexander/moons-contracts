@@ -12,61 +12,37 @@ contract Moons {
     event ParticipantAdded(address indexed participant, address indexed addedBy, uint256 rank, string memo);
     event ParticipantRemoved(address indexed participant, address indexed addedBy, uint256 rank, string memo);
     event FundsDisbursed(address indexed token, address indexed participant, uint256 amount, string memo);
+    event ConstitutionChanged(address indexed admin, string constitution);
+    event NameChanged(address indexed admin, string name);
+    event Knock(address indexed addr, string memo);
 
-    uint256 public startTime;
-    uint256 public cycleTime;
+    string public name;
+    string public constitution;
+
+    uint256 public immutable startTime;
+    uint256 public immutable cycleTime;
+
+    mapping(address => uint256) lastDisburseCycle;
 
     address[] admins;
+    uint256 adminCount;
     mapping(address => uint) adminIndex;
     mapping(address => uint) adminRank;
-    uint adminCount;
 
     address[] participants;
+    uint256 participantCount;
     mapping(address => uint) participantIndex;
     mapping(address => uint) participantRank;
-    uint participantCount;
 
-    mapping(address => mapping(address => uint256)) lastDisburseCycle;
-
-    function sqrt(uint256 x) public pure returns (uint256) {
-        if (x == 0) return 0;
-        if (x <= 3) return 1;
-        
-        uint256 z = x / 2;
-        uint256 y = x;
-
-        // Newton-Raphson iteration
-        while (z < y) {
-            y = z;
-            z = (x / z + z) / 2;
-        }
-
-        return y;
-    }
-
-    function getCycleParameters() public view returns (uint256, uint256) {
-        return (startTime, cycleTime);
-    }
-
-    function getCurrentCycle() public view returns (uint256) {
-        return (block.timestamp - startTime + cycleTime) / cycleTime;
-    }
-
-    function getMaximumAllowedDisbursement(address token) public view returns (uint256) {
-        uint256 balance = IERC20(token).balanceOf(address(this));
-        uint256 elapsedTime = block.timestamp - startTime;
-        uint256 rank = participantRank[msg.sender];
-        if (participantCount == 0 || rank == 0) {
-            return 0;
-        }
-
-        uint256 cycleTimeOffsetRadiansFixed18 = (elapsedTime * 2 * 3_141592653589793238) / cycleTime;
-        uint256 participantOffsetRadiansFixed18 = ((rank - 1) * 2 * 3_141592653589793238) / participantCount;
-        uint256 totalRadiansFixed18 = cycleTimeOffsetRadiansFixed18 + participantOffsetRadiansFixed18;
-        int256 multiplierSignedFixed18 = Trigonometry.sin(totalRadiansFixed18 / 2);
-        uint256 multiplierFixed18 = multiplierSignedFixed18 > 0 ? uint256(multiplierSignedFixed18) : uint256(-multiplierSignedFixed18);
-        uint256 sqrtParticipantCountFixed6 = sqrt(participantCount * (1e6 ** 2));
-        return multiplierFixed18 * balance / (sqrtParticipantCountFixed6 * 1e12);
+    constructor(string memory _name, string memory _constitution, uint256 _cycleTime) {
+        cycleTime = _cycleTime;
+        startTime = block.timestamp;
+        name = _name;
+        constitution = _constitution;
+        adminIndex[msg.sender] = 1;
+        adminRank[msg.sender] = 1;
+        admins.push(msg.sender);
+        adminCount = 1;
     }
 
     modifier requireAdmin() {
@@ -90,16 +66,41 @@ contract Moons {
         _;
     }
 
-    modifier disburseOncePerCycle(address token) {
+    modifier disburseOncePerCycle() {
         uint256 currentCycle = getCurrentCycle();
-        require(lastDisburseCycle[token][msg.sender] < currentCycle, "Can only disburse funds once per cycle");
-        lastDisburseCycle[token][msg.sender] = currentCycle;
+        require(lastDisburseCycle[msg.sender] < currentCycle, "Can only disburse funds once per cycle");
+        lastDisburseCycle[msg.sender] = currentCycle;
         _;
     }
 
     modifier disbursementValueIsBelowMaximum(address token, uint256 value) {
         require(value < getMaximumAllowedDisbursement(token), "Value equals or exceeds maximum allowed disbursment");
         _;
+    }
+
+    function getCurrentCycle() public view returns (uint256) {
+        return 1 + ((block.timestamp - startTime) / cycleTime);
+    }
+
+    function getMaximumAllowedDisbursement(address token) public view returns (uint256) {
+        uint256 balance = IERC20(token).balanceOf(address(this));
+        uint256 elapsedTime = block.timestamp - startTime;
+        uint256 rank = participantRank[msg.sender];
+        if (participantCount == 0 || rank == 0) {
+            return 0;
+        }
+
+        uint256 cycleTimeOffsetRadiansFixed18 = (elapsedTime * 2 * 3_141592653589793238) / cycleTime;
+        uint256 participantOffsetRadiansFixed18 = ((rank - 1) * 2 * 3_141592653589793238) / participantCount;
+        int256 sinOfHalfSignedFixed18 = Trigonometry.sin((cycleTimeOffsetRadiansFixed18 + participantOffsetRadiansFixed18) / 2);
+        uint256 sinOfHalfFixed18 = sinOfHalfSignedFixed18 > 0 ? uint256(sinOfHalfSignedFixed18) : uint256(-sinOfHalfSignedFixed18);
+        uint256 multiplierFixed18 = (sinOfHalfFixed18 ** 2) / 1e18;
+        uint256 sqrtParticipantCountFixed6 = sqrt(participantCount * (1e6 ** 2));
+        return multiplierFixed18 * balance / (sqrtParticipantCountFixed6 * 1e12);
+    }
+
+    function mayDisburse(address addr) public view returns (bool) {
+        return lastDisburseCycle[addr] < getCurrentCycle();
     }
 
     function getAdmins() public view returns (address[] memory, uint256[] memory) {
@@ -132,15 +133,6 @@ contract Moons {
             }
         }
         return (addresses, ranks);
-    }
-
-    constructor(uint256 _cycleTime) {
-        cycleTime = _cycleTime;
-        startTime = block.timestamp;
-        adminIndex[msg.sender] = 1;
-        adminRank[msg.sender] = 1;
-        admins.push(msg.sender);
-        adminCount = 1;
     }
 
     function addAdmin(address admin, string calldata memo) external requireAdmin {
@@ -198,8 +190,37 @@ contract Moons {
         emit ParticipantRemoved(participant, msg.sender, removedRank, memo);
     }
 
-    function disburseFunds(address token, uint256 value, string calldata memo) external requireParticipant disburseOncePerCycle(token) disbursementValueIsBelowMaximum(token, value) {
+    function disburseFunds(address token, uint256 value, string calldata memo) external requireParticipant disburseOncePerCycle disbursementValueIsBelowMaximum(token, value) {
         require(IERC20(token).transfer(msg.sender, value), "Transfer failed");
         emit FundsDisbursed(token, msg.sender, value, memo);
+    }
+
+    function setName(string calldata _name) external requireAdmin {
+        name = _name;
+        emit NameChanged(msg.sender, _name);
+    }
+
+    function setConstitution(string calldata _constitution) external requireAdmin {
+        constitution = _constitution;
+        emit ConstitutionChanged(msg.sender, _constitution);
+    }
+
+    function knock(string calldata memo) external {
+        emit Knock(msg.sender, memo);
+    }
+
+    function sqrt(uint256 x) public pure returns (uint256) {
+        if (x == 0) return 0;
+        if (x <= 3) return 1;
+        
+        uint256 z = x / 2;
+        uint256 y = x;
+
+        while (z < y) {
+            y = z;
+            z = (x / z + z) / 2;
+        }
+
+        return y;
     }
 }

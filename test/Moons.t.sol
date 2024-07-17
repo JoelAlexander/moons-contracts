@@ -33,7 +33,7 @@ contract MoonsTest is Test {
         participant4 = address(0x6);
 
         vm.startPrank(admin1);
-        moons = new Moons(1 days);
+        moons = new Moons("Test Moons", "ipfs://constitution-hash", 1 days);
         moons.addAdmin(admin2, "Add second admin");
         moons.addParticipant(participant1, "Add participant 1");
         moons.addParticipant(participant2, "Add participant 2");
@@ -138,22 +138,22 @@ contract MoonsTest is Test {
 
         vm.warp(block.timestamp + 1 hours);
         vm.prank(participant1);
-        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 32631403083275725500);
+        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 4259233868732866000);
         vm.prank(participant2);
-        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 198337500075966818250);
+        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 157351055745536550500);
         vm.prank(participant3);
-        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 247860179630974391250);
+        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 245738674586795570000);
         vm.prank(participant4);
-        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 152189727361402347250);
+        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 92646852457351913000);
 
         vm.warp(block.timestamp + 1 days);
         vm.prank(participant1);
-        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 32631403083275725500);
+        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 4259233868732866000);
         vm.prank(participant2);
-        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 198337500075966818250);
+        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 157351055745536550500);
         vm.prank(participant3);
-        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 247860179630974391250);
+        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 245738674586795570000);
         vm.prank(participant4);
-        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 152189727361402347250);
+        assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 92646852457351913000);
     }
 }
