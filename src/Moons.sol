@@ -7,13 +7,13 @@ import "../lib/solidity-trigonometry/src/Trigonometry.sol";
 
 contract Moons {
 
-    event AdminAdded(address indexed admin, address indexed addedBy, uint256 rank, string memo);
-    event AdminRemoved(address indexed admin, address indexed addedBy, uint256 rank, string memo);
-    event ParticipantAdded(address indexed participant, address indexed addedBy, uint256 rank, string memo);
-    event ParticipantRemoved(address indexed participant, address indexed addedBy, uint256 rank, string memo);
-    event FundsDisbursed(address indexed token, address indexed participant, uint256 amount, string memo);
-    event ConstitutionChanged(address indexed admin, string constitution);
-    event NameChanged(address indexed admin, string name);
+    event AdminAdded(address indexed admin, address indexed by, uint256 rank, string memo);
+    event AdminRemoved(address indexed admin, address indexed by, uint256 rank, string memo);
+    event ParticipantAdded(address indexed participant, address indexed by, uint256 rank, string memo);
+    event ParticipantRemoved(address indexed participant, address indexed by, uint256 rank, string memo);
+    event FundsDisbursed(address indexed token, address indexed by, uint256 amount, string memo);
+    event ConstitutionChanged(address indexed by, string constitution);
+    event NameChanged(address indexed by, string name);
     event Knock(address indexed addr, string memo);
 
     string public name;
@@ -51,7 +51,7 @@ contract Moons {
     }
 
     modifier requireAdminSeniority(address addr) {
-        require(adminRank[msg.sender] > 0 && adminRank[addr] > 0 && (adminRank[msg.sender] < adminRank[addr]),
+        require(adminRank[msg.sender] > 0 && adminRank[addr] > 0 && adminRank[msg.sender] <= adminRank[addr] && adminRank[addr] != 1,
         "Must have admin seniority");
         _;
     }
