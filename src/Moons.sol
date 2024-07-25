@@ -34,6 +34,14 @@ contract Moons {
     mapping(address => uint) participantIndex;
     mapping(address => uint) participantRank;
 
+    receive() external payable {
+        revert();
+    }
+
+    fallback() external payable {
+        revert();
+    }
+
     constructor(string memory _name, string memory _constitution, uint256 _cycleTime) {
         cycleTime = _cycleTime;
         startTime = block.timestamp;
