@@ -59,7 +59,7 @@ contract Moons {
     }
 
     modifier requireAdminSeniority(address addr) {
-        require(adminRank[msg.sender] > 0 && adminRank[addr] > 0 && adminRank[msg.sender] <= adminRank[addr] && adminRank[addr] != 1,
+        require(adminRank[msg.sender] > 0 && adminRank[addr] > 0 && adminRank[msg.sender] <= adminRank[addr] && !(adminCount == 1 && adminRank[addr] == 1),
         "Must have admin seniority");
         _;
     }

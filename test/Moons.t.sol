@@ -160,4 +160,23 @@ contract MoonsTest is Test {
         vm.prank(participant4);
         assertEq(moons.getMaximumAllowedDisbursement(address(testToken)), 92646852457351913000);
     }
+
+    function testRank1AdminSelfRemoveWithOtherAdmins() public {
+        vm.startPrank(admin1);
+        moons.addAdmin(address(0x7), "Add admin 3");
+        moons.removeAdmin(admin1, "Remove self as rank 1 admin");
+        (address[] memory admins, ) = moons.getAdmins();
+        assertEq(admins.length, 2);
+        assertEq(admins[0], admin2);
+        assertEq(admins[1], address(0x7));
+        vm.stopPrank();
+    }
+
+    function testRank1AdminSelfRemoveWithNoOtherAdmins() public {
+        vm.startPrank(admin1);
+        moons.removeAdmin(admin2, "Remove admin 2");
+        vm.expectRevert("Must have admin seniority");
+        moons.removeAdmin(admin1, "Try to remove self as sole rank 1 admin");
+        vm.stopPrank();
+    }
 }
